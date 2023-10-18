@@ -1,0 +1,190 @@
+version: "3.1"
+services:
+  checkout-postgres:
+    image: postgres:15.1
+    environment:
+      POSTGRES_DB: checkout
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      PGDATA: "/var/lib/postgresql/data/checkout/pgdata"
+    volumes:
+      - .:/var/lib/postgresql/data
+    ports:
+      - 5435:5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d checkout"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 4G
+
+  loms-postgres:
+    image: postgres:15.1
+    environment:
+      POSTGRES_DB: loms
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      PGDATA: "/var/lib/postgresql/data/loms/pgdata"
+    volumes:
+      - .:/var/lib/postgresql/data
+    ports:
+      - 5434:5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d loms"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 4G           
+
+  checkout:
+    image: checkout
+    build: ./checkout/
+    environment:
+      DATABASE_URL: postgres://user:password@checkout-postgres:5432/checkout?sslmode=disable
+      JAEGER_AGENT_HOST: jaeger
+      JAEGER_AGENT_PORT: 6831      
+      JAEGER_SAMPLER_TYPE: const
+      JAEGER_SAMPLER_PARAM: 1
+    ports:
+      - "8080:8080"
+      - "8090:8090"
+    depends_on:
+      - checkout-postgres  
+
+  loms:
+    image: loms
+    build: ./loms/
+    environment:
+      DATABASE_URL: postgres://user:password@loms-postgres:5432/loms?sslmode=disable
+      JAEGER_AGENT_HOST: jaeger
+      JAEGER_AGENT_PORT: 6831
+      JAEGER_SAMPLER_TYPE: const
+      JAEGER_SAMPLER_PARAM: 1      
+    ports:
+      - "8081:8081"
+      - "8091:8091"
+    depends_on:
+      - loms-postgres
+      - kafka1
+      - kafka2
+      - kafka3
+
+  notifications:
+    image: notifications
+    build: ./notifications/
+    ports:
+      - "8082:8082"
+    depends_on:
+      - kafka1
+      - kafka2
+      - kafka3
+
+  # kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    ports:
+    - "2181:2181"
+    - "2888:2888"
+    - "3888:3888"
+    healthcheck:
+      test: echo stat | nc localhost 2181
+      interval: 10s
+      timeout: 10s
+      retries: 3
+    environment:
+    - ZOOKEEPER_SERVER_ID=1
+    - ZOOKEEPER_CLIENT_PORT=2181
+    - ZOOKEEPER_TICK_TIME=2000
+    - ZOOKEEPER_INIT_LIMIT=5
+    - ZOOKEEPER_SYNC_LIMIT=2
+    - ZOOKEEPER_SERVERS=zookeeper:2888:3888
+  kafka1:
+    image: confluentinc/cp-kafka:latest
+    healthcheck:
+      test: ps augwwx | egrep [S]upportedKafka
+    depends_on:
+    - zookeeper
+    ports:
+    - "9091:9091"
+    environment:
+    - KAFKA_LISTENERS=LISTENER_INT://kafka1:29091,LISTENER_EXT://0.0.0.0:9091
+    - KAFKA_ADVERTISED_LISTENERS=LISTENER_INT://kafka1:29091,LISTENER_EXT://localhost:9091
+    - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=LISTENER_INT:PLAINTEXT,LISTENER_EXT:PLAINTEXT
+    - KAFKA_INTER_BROKER_LISTENER_NAME=LISTENER_INT
+    - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+    - KAFKA_BROKER_ID=1
+    - ZOOKEEPER=zookeeper:2181
+  kafka2:
+    image: confluentinc/cp-kafka:latest
+    healthcheck:
+      test: ps augwwx | egrep [S]upportedKafka
+    depends_on:
+    - zookeeper
+    ports:
+    - "9092:9092"
+    environment:
+    - KAFKA_LISTENERS=LISTENER_INT://kafka2:29092,LISTENER_EXT://0.0.0.0:9092
+    - KAFKA_ADVERTISED_LISTENERS=LISTENER_INT://kafka2:29092,LISTENER_EXT://localhost:9092
+    - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=LISTENER_INT:PLAINTEXT,LISTENER_EXT:PLAINTEXT
+    - KAFKA_INTER_BROKER_LISTENER_NAME=LISTENER_INT
+    - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+    - KAFKA_BROKER_ID=2
+    - ZOOKEEPER=zookeeper:2181
+  kafka3:
+    image: confluentinc/cp-kafka:latest
+    healthcheck:
+      test: ps augwwx | egrep [S]upportedKafka
+    depends_on:
+    - zookeeper
+    ports:
+    - "9093:9093"
+    environment:
+    - KAFKA_LISTENERS=LISTENER_INT://kafka3:29093,LISTENER_EXT://0.0.0.0:9093
+    - KAFKA_ADVERTISED_LISTENERS=LISTENER_INT://kafka3:29093,LISTENER_EXT://localhost:9093
+    - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=LISTENER_INT:PLAINTEXT,LISTENER_EXT:PLAINTEXT
+    - KAFKA_INTER_BROKER_LISTENER_NAME=LISTENER_INT
+    - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+    - KAFKA_BROKER_ID=3
+    - ZOOKEEPER=zookeeper:2181
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.18
+    ports:
+      - 5775:5775/udp
+      - 6831:6831/udp
+      - 6832:6832/udp
+      - 5778:5778
+      - 16686:16686 # web
+      - 14268:14268
+      - 9411:9411
+
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - 9090:9090
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./alerts.yml:/etc/prometheus/alerts.yml
+    # extra_hosts:
+    #   - host.docker.internal:host-gateway
+
+  grafana:
+    image: grafana/grafana-oss
+    ports:
+      - 3000:3000
+    volumes:
+      - ./data:/var/lib/grafana
+    links:
+      - prometheus

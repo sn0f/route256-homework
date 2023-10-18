@@ -1,0 +1,8 @@
+/bin
+config.yml
+/cmd/app/config.yml
+vendor-proto
+pgdata
+data
+migration.sh
+coverage.out

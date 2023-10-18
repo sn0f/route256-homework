@@ -1,0 +1,5 @@
+/bin
+vendor-proto
+pgdata
+migration.sh
+config.yml

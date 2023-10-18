@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package route256.order;
+
+option go_package = "route256/loms/pkg/order/v1;order";
+
+message OrderMessage {
+    int64 order_id = 1;
+    OrderStatus status = 2;
+}
+
+enum OrderStatus {
+    None = 0;
+    New = 1;
+    AwaitingPayment = 2;
+    Failed = 3;
+    Payed = 4;
+    Cancelled = 5;
+}
